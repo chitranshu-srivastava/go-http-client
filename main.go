@@ -14,16 +14,27 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	
+	"http-client/auth"
 )
 
 type Config struct {
-	Method   string
-	URL      string
-	Headers  []string
-	Query    []string
-	Data     string
-	Form     []string
-	Timeout  time.Duration
+	Method         string
+	URL            string
+	Headers        []string
+	Query          []string
+	Data           string
+	Form           []string
+	Timeout        time.Duration
+	Username       string
+	Password       string
+	BearerToken    string
+	ClientID       string
+	ClientSecret   string
+	TokenURL       string
+	Scopes         []string
+	CustomHeader   string
+	CustomValue    string
 }
 
 type HeaderList []string
@@ -59,11 +70,23 @@ func (f *FormList) Set(value string) error {
 	return nil
 }
 
+type ScopeList []string
+
+func (s *ScopeList) String() string {
+	return strings.Join(*s, " ")
+}
+
+func (s *ScopeList) Set(value string) error {
+	*s = append(*s, value)
+	return nil
+}
+
 func main() {
 	var config Config
 	var headers HeaderList
 	var queries QueryList
 	var forms FormList
+	var scopes ScopeList
 
 	flag.StringVar(&config.Method, "X", "GET", "HTTP method")
 	flag.StringVar(&config.Method, "method", "GET", "HTTP method")
@@ -77,6 +100,19 @@ func main() {
 	flag.Var(&forms, "form", "Form data in 'key=value' or 'key=@filename' format")
 	flag.DurationVar(&config.Timeout, "t", 30*time.Second, "Request timeout")
 	flag.DurationVar(&config.Timeout, "timeout", 30*time.Second, "Request timeout")
+	
+	flag.StringVar(&config.Username, "u", "", "Username for basic authentication (use with --password)")
+	flag.StringVar(&config.Username, "user", "", "Username for basic authentication (use with --password)")
+	flag.StringVar(&config.Password, "p", "", "Password for basic authentication")
+	flag.StringVar(&config.Password, "password", "", "Password for basic authentication")
+	flag.StringVar(&config.BearerToken, "b", "", "Bearer token for authentication")
+	flag.StringVar(&config.BearerToken, "bearer", "", "Bearer token for authentication")
+	flag.StringVar(&config.ClientID, "client-id", "", "OAuth2 client ID for client credentials flow")
+	flag.StringVar(&config.ClientSecret, "client-secret", "", "OAuth2 client secret for client credentials flow")
+	flag.StringVar(&config.TokenURL, "token-url", "", "OAuth2 token endpoint URL")
+	flag.Var(&scopes, "scope", "OAuth2 scope (can be used multiple times)")
+	flag.StringVar(&config.CustomHeader, "auth-header", "", "Custom authentication header name")
+	flag.StringVar(&config.CustomValue, "auth-value", "", "Custom authentication header value")
 
 	flag.Parse()
 
@@ -90,6 +126,7 @@ func main() {
 	config.Headers = headers
 	config.Query = queries
 	config.Form = forms
+	config.Scopes = scopes
 
 	if err := makeRequest(config); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -129,6 +166,27 @@ func makeRequest(config Config) error {
 
 	addHeaders(req, config.Headers)
 	addQueryParams(req, config.Query)
+	
+	authenticator, err := auth.NewAuthenticator(auth.Config{
+		Username:     config.Username,
+		Password:     config.Password,
+		BearerToken:  config.BearerToken,
+		ClientID:     config.ClientID,
+		ClientSecret: config.ClientSecret,
+		TokenURL:     config.TokenURL,
+		Scopes:       config.Scopes,
+		CustomHeader: config.CustomHeader,
+		CustomValue:  config.CustomValue,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create authenticator: %w", err)
+	}
+	
+	if authenticator != nil {
+		if err := authenticator.Apply(req); err != nil {
+			return fmt.Errorf("failed to apply authentication: %w", err)
+		}
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), config.Timeout)
 	defer cancel()
