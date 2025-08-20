@@ -16,6 +16,7 @@ import (
 	"time"
 	
 	"http-client/auth"
+	"http-client/response"
 )
 
 type Config struct {
@@ -35,6 +36,7 @@ type Config struct {
 	Scopes         []string
 	CustomHeader   string
 	CustomValue    string
+	PrettyPrint    bool
 }
 
 type HeaderList []string
@@ -113,6 +115,7 @@ func main() {
 	flag.Var(&scopes, "scope", "OAuth2 scope (can be used multiple times)")
 	flag.StringVar(&config.CustomHeader, "auth-header", "", "Custom authentication header name")
 	flag.StringVar(&config.CustomValue, "auth-value", "", "Custom authentication header value")
+	flag.BoolVar(&config.PrettyPrint, "pretty", false, "Pretty-print JSON and XML responses")
 
 	flag.Parse()
 
@@ -207,11 +210,19 @@ func makeRequest(config Config) error {
 	}
 	fmt.Println()
 
-	_, err = io.Copy(os.Stdout, resp.Body)
-	if err != nil {
-		return fmt.Errorf("failed to read response body: %w", err)
+	var formatter response.Formatter
+	if config.PrettyPrint {
+		formatter = response.NewPrettyFormatter()
+	} else {
+		formatter = response.NewRawFormatter()
 	}
 
+	formattedBody, err := formatter.Format(resp)
+	if err != nil {
+		return fmt.Errorf("failed to format response: %w", err)
+	}
+
+	fmt.Print(string(formattedBody))
 	return nil
 }
 
