@@ -16,6 +16,7 @@ import (
 	"time"
 	
 	"http-client/auth"
+	"http-client/ratelimit"
 	"http-client/response"
 )
 
@@ -37,6 +38,7 @@ type Config struct {
 	CustomHeader   string
 	CustomValue    string
 	PrettyPrint    bool
+	RateLimit      string
 }
 
 type HeaderList []string
@@ -116,6 +118,8 @@ func main() {
 	flag.StringVar(&config.CustomHeader, "auth-header", "", "Custom authentication header name")
 	flag.StringVar(&config.CustomValue, "auth-value", "", "Custom authentication header value")
 	flag.BoolVar(&config.PrettyPrint, "pretty", false, "Pretty-print JSON and XML responses")
+	flag.StringVar(&config.RateLimit, "rate", "", "Rate limit in format 'requests/duration' (e.g., '10/s', '100/30s')")
+	flag.StringVar(&config.RateLimit, "r", "", "Rate limit in format 'requests/duration' (e.g., '10/s', '100/30s')")
 
 	flag.Parse()
 
@@ -138,6 +142,12 @@ func main() {
 }
 
 func makeRequest(config Config) error {
+	// Initialize rate limiter if specified
+	rateLimiter, err := ratelimit.New(config.RateLimit)
+	if err != nil {
+		return fmt.Errorf("failed to create rate limiter: %w", err)
+	}
+
 	parsedURL, err := url.Parse(config.URL)
 	if err != nil {
 		return fmt.Errorf("invalid URL: %w", err)
@@ -194,6 +204,13 @@ func makeRequest(config Config) error {
 	ctx, cancel := context.WithTimeout(context.Background(), config.Timeout)
 	defer cancel()
 	req = req.WithContext(ctx)
+
+	// Apply rate limiting
+	if rateLimiter.IsEnabled() {
+		if err := rateLimiter.Wait(ctx); err != nil {
+			return fmt.Errorf("rate limit wait failed: %w", err)
+		}
+	}
 
 	client := &http.Client{}
 	resp, err := client.Do(req)
